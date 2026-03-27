@@ -1,0 +1,12 @@
+{
+  "name": "whatsapp-webhook-test",
+  "version": "1.0.0",
+  "description": "Webhook de teste para WhatsApp Cloud API",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
