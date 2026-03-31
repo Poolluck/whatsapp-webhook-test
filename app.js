@@ -5,6 +5,8 @@ app.use(express.json());
 
 const port = process.env.PORT || 3000;
 const verifyToken = process.env.VERIFY_TOKEN;
+const whatsappToken = process.env.WHATSAPP_TOKEN;
+const phoneNumberId = process.env.PHONE_NUMBER_ID;
 
 // Verificação do webhook pela Meta
 app.get('/', (req, res) => {
@@ -25,8 +27,46 @@ app.get('/', (req, res) => {
   return res.status(403).send('Token inválido');
 });
 
+// Função para enviar mensagem pelo WhatsApp Cloud API
+async function sendWhatsAppText(to, text) {
+  if (!whatsappToken || !phoneNumberId) {
+    throw new Error('WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurados.');
+  }
+
+  const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: {
+      body: text
+    }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${whatsappToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json();
+
+  console.log('--- RESPOSTA DA META AO ENVIAR MENSAGEM ---');
+  console.log(JSON.stringify(data, null, 2));
+
+  if (!response.ok) {
+    throw new Error(`Erro ao enviar mensagem: ${response.status} ${JSON.stringify(data)}`);
+  }
+
+  return data;
+}
+
 // Recebimento de eventos do WhatsApp
-app.post('/', (req, res) => {
+app.post('/', async (req, res) => {
   console.log('--- POST recebido ---');
 
   try {
@@ -68,6 +108,11 @@ app.post('/', (req, res) => {
     console.log('from:', from);
     console.log('type:', type);
     console.log('textoRecebido:', textoRecebido);
+
+    // Responde só para mensagens de texto simples
+    if (type === 'text') {
+      await sendWhatsAppText(from, 'Olá! Recebi sua mensagem 😊');
+    }
 
     return res.status(200).json({ status: 'received' });
   } catch (error) {
