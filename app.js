@@ -8,6 +8,17 @@ const verifyToken = process.env.VERIFY_TOKEN;
 const whatsappToken = process.env.WHATSAPP_TOKEN;
 const phoneNumberId = process.env.PHONE_NUMBER_ID;
 
+// Guarda IDs já processados em memória
+const processedMessages = new Set();
+
+// Limpeza simples para não crescer para sempre
+setInterval(() => {
+  if (processedMessages.size > 1000) {
+    processedMessages.clear();
+    console.log('Cache de mensagens processadas foi limpo.');
+  }
+}, 60 * 60 * 1000);
+
 // Verificação do webhook pela Meta
 app.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -65,60 +76,74 @@ async function sendWhatsAppText(to, text) {
   return data;
 }
 
+// Função separada para processar mensagem
+async function processIncomingMessage(body) {
+  const entry = body?.entry?.[0];
+  const changes = entry?.changes?.[0];
+  const value = changes?.value;
+
+  const contact = value?.contacts?.[0];
+  const message = value?.messages?.[0];
+
+  if (!message) {
+    console.log('Nenhuma mensagem encontrada neste evento.');
+    return;
+  }
+
+  const messageId = message?.id || 'sem_id';
+  const nome = contact?.profile?.name || 'Sem nome';
+  const waId = contact?.wa_id || 'Sem wa_id';
+  const from = message?.from || 'Sem remetente';
+  const type = message?.type || 'tipo_desconhecido';
+
+  if (processedMessages.has(messageId)) {
+    console.log('Mensagem duplicada ignorada. ID:', messageId);
+    return;
+  }
+
+  processedMessages.add(messageId);
+
+  let textoRecebido = '';
+
+  if (type === 'text') {
+    textoRecebido = message?.text?.body || '';
+  } else if (type === 'interactive') {
+    textoRecebido =
+      message?.interactive?.button_reply?.title ||
+      message?.interactive?.list_reply?.title ||
+      'Mensagem interativa recebida';
+  } else {
+    textoRecebido = `Mensagem recebida do tipo: ${type}`;
+  }
+
+  console.log('--- MENSAGEM PROCESSADA ---');
+  console.log('messageId:', messageId);
+  console.log('Nome:', nome);
+  console.log('wa_id:', waId);
+  console.log('from:', from);
+  console.log('type:', type);
+  console.log('textoRecebido:', textoRecebido);
+
+  if (type === 'text') {
+    await sendWhatsAppText(from, 'Olá! Recebi sua mensagem 😊');
+  }
+}
+
 // Recebimento de eventos do WhatsApp
-app.post('/', async (req, res) => {
+app.post('/', (req, res) => {
   console.log('--- POST recebido ---');
 
-  try {
-    const body = req.body;
+  // Responde imediatamente para a Meta
+  res.status(200).json({ status: 'received_fast' });
 
-    const entry = body?.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-
-    const contact = value?.contacts?.[0];
-    const message = value?.messages?.[0];
-
-    if (!message) {
-      console.log('Nenhuma mensagem encontrada neste evento.');
-      console.log(JSON.stringify(body, null, 2));
-      return res.status(200).json({ status: 'no_message' });
+  // Processa em segundo plano
+  setImmediate(async () => {
+    try {
+      await processIncomingMessage(req.body);
+    } catch (error) {
+      console.error('Erro ao processar mensagem em background:', error);
     }
-
-    const nome = contact?.profile?.name || 'Sem nome';
-    const waId = contact?.wa_id || 'Sem wa_id';
-    const from = message?.from || 'Sem remetente';
-    const type = message?.type || 'tipo_desconhecido';
-
-    let textoRecebido = '';
-
-    if (type === 'text') {
-      textoRecebido = message?.text?.body || '';
-    } else if (type === 'interactive') {
-      textoRecebido =
-        message?.interactive?.button_reply?.title ||
-        message?.interactive?.list_reply?.title ||
-        'Mensagem interativa recebida';
-    } else {
-      textoRecebido = `Mensagem recebida do tipo: ${type}`;
-    }
-
-    console.log('Nome:', nome);
-    console.log('wa_id:', waId);
-    console.log('from:', from);
-    console.log('type:', type);
-    console.log('textoRecebido:', textoRecebido);
-
-    // Responde só para mensagens de texto simples
-    if (type === 'text') {
-      await sendWhatsAppText(from, 'Olá! Recebi sua mensagem 😊');
-    }
-
-    return res.status(200).json({ status: 'received' });
-  } catch (error) {
-    console.error('Erro ao processar POST:', error);
-    return res.status(200).json({ status: 'error_but_acknowledged' });
-  }
+  });
 });
 
 app.listen(port, () => {
